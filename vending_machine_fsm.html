@@ -157,6 +157,65 @@
   td { padding: 8px 10px; border-bottom: 1px solid #1e293b; }
   tr:hover td { background: #334155; }
   tr.active-row td { background: #0c4a6e; }
+
+  /* --- Data Stream Monitor --- */
+  .stream-panel { grid-column: 1 / -1; }
+  .stream-stats {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: 12px;
+    margin-bottom: 14px;
+  }
+  .stream-stat {
+    background: #0f172a;
+    border: 1px solid #334155;
+    border-radius: 8px;
+    padding: 12px;
+    text-align: center;
+  }
+  .stream-stat .label { font-size: 0.7rem; color: #64748b; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 4px; }
+  .stream-stat .value { font-size: 1.3rem; font-weight: 700; font-family: 'Cascadia Code', 'Fira Code', monospace; }
+  .stream-stat .unit { font-size: 0.7rem; color: #64748b; margin-left: 2px; }
+  #streamTotalBytes .value { color: #38bdf8; }
+  #streamEventBytes .value { color: #4ade80; }
+  #streamStateBytes .value { color: #facc15; }
+  #streamEventCount .value { color: #a78bfa; }
+  #streamAvgSize .value { color: #fb923c; }
+  #streamThroughput .value { color: #f472b6; }
+
+  .throughput-bar-bg {
+    width: 100%;
+    height: 8px;
+    background: #1e293b;
+    border-radius: 4px;
+    overflow: hidden;
+    margin-top: 12px;
+  }
+  .throughput-bar-fill {
+    height: 100%;
+    background: linear-gradient(90deg, #38bdf8, #a78bfa, #f472b6);
+    border-radius: 4px;
+    transition: width 0.4s ease;
+    width: 0%;
+  }
+
+  #streamLog {
+    height: 140px;
+    overflow-y: auto;
+    background: #0f172a;
+    border-radius: 8px;
+    padding: 10px;
+    font-family: 'Cascadia Code', 'Fira Code', monospace;
+    font-size: 0.78rem;
+    line-height: 1.5;
+    border: 1px solid #334155;
+    margin-top: 10px;
+  }
+  .stream-entry { padding: 1px 0; color: #94a3b8; }
+  .stream-entry .hex { color: #64748b; font-size: 0.72rem; }
+  .stream-entry .sz { color: #38bdf8; font-weight: 600; }
+  .stream-entry .dir-in  { color: #4ade80; }
+  .stream-entry .dir-out { color: #facc15; }
 </style>
 </head>
 <body>
@@ -297,6 +356,39 @@
     <div id="log"></div>
   </div>
 
+  <!-- Data Stream Monitor -->
+  <div class="panel stream-panel">
+    <h2>Data Stream Byte Monitor</h2>
+    <div class="stream-stats">
+      <div class="stream-stat" id="streamTotalBytes">
+        <div class="label">Total Bytes</div>
+        <div class="value">0<span class="unit">B</span></div>
+      </div>
+      <div class="stream-stat" id="streamEventBytes">
+        <div class="label">Event Data (in)</div>
+        <div class="value">0<span class="unit">B</span></div>
+      </div>
+      <div class="stream-stat" id="streamStateBytes">
+        <div class="label">State Snapshots (out)</div>
+        <div class="value">0<span class="unit">B</span></div>
+      </div>
+      <div class="stream-stat" id="streamEventCount">
+        <div class="label">Events Processed</div>
+        <div class="value">0</div>
+      </div>
+      <div class="stream-stat" id="streamAvgSize">
+        <div class="label">Avg Event Size</div>
+        <div class="value">0<span class="unit">B</span></div>
+      </div>
+      <div class="stream-stat" id="streamThroughput">
+        <div class="label">Throughput</div>
+        <div class="value">0<span class="unit">B/s</span></div>
+      </div>
+    </div>
+    <div class="throughput-bar-bg"><div class="throughput-bar-fill" id="throughputBar"></div></div>
+    <div id="streamLog"></div>
+  </div>
+
   <!-- Transition Table -->
   <div class="panel table-panel">
     <h2>State Transition Table</h2>
@@ -339,6 +431,110 @@ const TRANSITIONS = [
 ];
 
 // -----------------------------------------------------------------------
+// Data Stream Byte Monitor
+// -----------------------------------------------------------------------
+const dataStreamMonitor = {
+  totalBytesIn: 0,       // event payload bytes entering FSM
+  totalBytesOut: 0,      // state snapshot bytes leaving FSM
+  eventCount: 0,
+  entries: [],           // per-event records
+  startTime: Date.now(),
+
+  // Measure byte length of a JS value serialized to JSON (UTF-8)
+  byteLength(obj) {
+    const json = JSON.stringify(obj);
+    return new Blob([json]).size;
+  },
+
+  // Hex preview of first N bytes of a JSON string
+  hexPreview(obj, maxBytes) {
+    maxBytes = maxBytes || 16;
+    const json = JSON.stringify(obj);
+    let hex = "";
+    for (let i = 0; i < Math.min(json.length, maxBytes); i++) {
+      hex += json.charCodeAt(i).toString(16).padStart(2, "0") + " ";
+    }
+    if (json.length > maxBytes) hex += "...";
+    return hex.trim();
+  },
+
+  // Record an inbound event and outbound state snapshot
+  record(event, prevState, newState, snapshot) {
+    const eventBytes = this.byteLength(event);
+    const snapshotBytes = this.byteLength(snapshot);
+    this.totalBytesIn += eventBytes;
+    this.totalBytesOut += snapshotBytes;
+    this.eventCount++;
+
+    const entry = {
+      seq: this.eventCount,
+      timestamp: Date.now(),
+      event,
+      eventBytes,
+      snapshotBytes,
+      prevState,
+      newState,
+    };
+    this.entries.push(entry);
+
+    this._logEntry(entry);
+    this._updateStats();
+  },
+
+  _logEntry(entry) {
+    const el = document.getElementById("streamLog");
+    const t = new Date(entry.timestamp).toLocaleTimeString();
+    const eventHex = this.hexPreview(entry.event);
+    const arrow = entry.prevState !== entry.newState
+      ? `${entry.prevState} → ${entry.newState}`
+      : entry.prevState;
+    el.innerHTML += `<div class="stream-entry">`
+      + `<span class="time">${t}</span> `
+      + `#${entry.seq} `
+      + `<span class="dir-in">IN</span> <span class="sz">${this.formatBytes(entry.eventBytes)}</span> `
+      + `<span class="dir-out">OUT</span> <span class="sz">${this.formatBytes(entry.snapshotBytes)}</span> `
+      + `[${arrow}] `
+      + `<span class="hex">${eventHex}</span>`
+      + `</div>`;
+    el.scrollTop = el.scrollHeight;
+  },
+
+  _updateStats() {
+    const total = this.totalBytesIn + this.totalBytesOut;
+    const avg = this.eventCount > 0 ? Math.round(this.totalBytesIn / this.eventCount) : 0;
+    const elapsed = (Date.now() - this.startTime) / 1000 || 1;
+    const throughput = total / elapsed;
+
+    document.querySelector("#streamTotalBytes .value").innerHTML = this.formatBytes(total) + '<span class="unit"></span>';
+    document.querySelector("#streamEventBytes .value").innerHTML = this.formatBytes(this.totalBytesIn) + '<span class="unit"></span>';
+    document.querySelector("#streamStateBytes .value").innerHTML = this.formatBytes(this.totalBytesOut) + '<span class="unit"></span>';
+    document.querySelector("#streamEventCount .value").textContent = this.eventCount;
+    document.querySelector("#streamAvgSize .value").innerHTML = this.formatBytes(avg) + '<span class="unit"></span>';
+    document.querySelector("#streamThroughput .value").innerHTML = this.formatBytes(Math.round(throughput)) + '<span class="unit">/s</span>';
+
+    // Throughput bar (cap at 2KB/s for display)
+    const pct = Math.min(100, (throughput / 2048) * 100);
+    document.getElementById("throughputBar").style.width = pct + "%";
+  },
+
+  formatBytes(b) {
+    if (b < 1024) return b + " B";
+    if (b < 1048576) return (b / 1024).toFixed(1) + " KB";
+    return (b / 1048576).toFixed(2) + " MB";
+  },
+
+  reset() {
+    this.totalBytesIn = 0;
+    this.totalBytesOut = 0;
+    this.eventCount = 0;
+    this.entries = [];
+    this.startTime = Date.now();
+    document.getElementById("streamLog").innerHTML = "";
+    this._updateStats();
+  },
+};
+
+// -----------------------------------------------------------------------
 // FSM Engine
 // -----------------------------------------------------------------------
 const fsm = {
@@ -349,8 +545,22 @@ const fsm = {
   changeDue: 0,
   lastEdge: "",
 
+  // Build a full state snapshot for stream monitoring
+  _snapshot() {
+    return {
+      state: this.state,
+      balance: this.balance,
+      selectedItem: this.selectedItem,
+      errorMessage: this.errorMessage,
+      changeDue: this.changeDue,
+      inventory: Object.fromEntries(
+        Object.entries(ITEMS).map(([id, it]) => [id, { stock: it.stock }])
+      ),
+    };
+  },
+
   send(event) {
-    const prev = this.state;
+    const prevState = this.state;
     this._process(event);
 
     // Auto-transition DISPENSE, CHANGE, ERROR
@@ -358,6 +568,9 @@ const fsm = {
     while (["DISPENSE","CHANGE","ERROR"].includes(this.state) && safety-- > 0) {
       this._process({ type: "AUTO" });
     }
+
+    // Record streamed bytes: inbound event + outbound state snapshot
+    dataStreamMonitor.record(event, prevState, this.state, this._snapshot());
 
     updateUI();
   },
@@ -558,6 +771,7 @@ function resetMachine() {
   // Reset stock properly
   ITEMS.A1.stock = 5; ITEMS.B2.stock = 3; ITEMS.C3.stock = 10; ITEMS.D4.stock = 0;
   document.getElementById("log").innerHTML = "";
+  dataStreamMonitor.reset();
   log("action", "Machine reset");
   updateUI();
 }
