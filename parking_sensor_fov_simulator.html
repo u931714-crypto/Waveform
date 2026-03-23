@@ -1,0 +1,884 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Parking Sensor FOV Simulator</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg: #0d1117;
+      --panel: #161b22;
+      --border: #30363d;
+      --text: #c9d1d9;
+      --muted: #8b949e;
+      --accent: #58a6ff;
+      --col-rr:  #ff7b54;
+      --col-rrc: #e63950;
+      --col-rlc: #457bcd;
+      --col-rl:  #2ea87e;
+    }
+
+    body {
+      font-family: 'Segoe UI', system-ui, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      display: flex;
+      flex-direction: column;
+      height: 100vh;
+      overflow: hidden;
+    }
+
+    /* ── Header ───────────────────────────────────── */
+    header {
+      background: var(--panel);
+      border-bottom: 1px solid var(--border);
+      padding: 10px 20px;
+      display: flex;
+      align-items: baseline;
+      gap: 16px;
+      flex-shrink: 0;
+    }
+    header h1 { font-size: 16px; color: var(--accent); letter-spacing: .5px; }
+    header span { font-size: 11px; color: var(--muted); }
+
+    /* ── Layout ───────────────────────────────────── */
+    .main {
+      display: flex;
+      flex: 1;
+      overflow: hidden;
+    }
+
+    /* ── Controls panel ───────────────────────────── */
+    .controls {
+      width: 290px;
+      flex-shrink: 0;
+      background: var(--panel);
+      border-right: 1px solid var(--border);
+      overflow-y: auto;
+      padding: 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    .section-title {
+      font-size: 10px;
+      font-weight: 600;
+      letter-spacing: 1px;
+      text-transform: uppercase;
+      color: var(--muted);
+      border-bottom: 1px solid var(--border);
+      padding-bottom: 4px;
+      margin-bottom: 4px;
+    }
+
+    /* Global spacing controls */
+    .global-controls { display: flex; flex-direction: column; gap: 6px; }
+
+    /* Sensor card */
+    .sensor-card {
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      overflow: hidden;
+    }
+    .sensor-header {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 10px;
+      cursor: pointer;
+      user-select: none;
+      background: rgba(255,255,255,.03);
+    }
+    .sensor-header:hover { background: rgba(255,255,255,.06); }
+    .swatch {
+      width: 10px; height: 10px;
+      border-radius: 50%;
+      flex-shrink: 0;
+    }
+    .sensor-header .name { font-size: 13px; font-weight: 600; flex: 1; }
+    .sensor-header .pos-info { font-size: 10px; color: var(--muted); }
+    .chevron { font-size: 10px; color: var(--muted); transition: transform .2s; }
+    .sensor-card.open .chevron { transform: rotate(90deg); }
+
+    .sensor-body {
+      display: none;
+      padding: 8px 10px;
+      border-top: 1px solid var(--border);
+    }
+    .sensor-card.open .sensor-body { display: block; }
+
+    /* Row/slider */
+    .row {
+      display: grid;
+      grid-template-columns: 58px 1fr 42px;
+      align-items: center;
+      gap: 6px;
+      margin-bottom: 5px;
+    }
+    .row label { font-size: 11px; color: var(--muted); }
+    .row input[type=range] {
+      width: 100%;
+      -webkit-appearance: none;
+      appearance: none;
+      height: 3px;
+      border-radius: 2px;
+      background: #30363d;
+      outline: none;
+    }
+    .row input[type=range]::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      width: 12px; height: 12px;
+      border-radius: 50%;
+      background: var(--accent);
+      cursor: pointer;
+    }
+    .row .val {
+      font-size: 11px;
+      font-family: monospace;
+      text-align: right;
+      color: var(--text);
+    }
+
+    .sub-section { font-size: 10px; color: var(--muted); margin: 8px 0 4px; letter-spacing: .5px; }
+
+    /* ── Right area ───────────────────────────────── */
+    .right {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+
+    /* ── Chart panel ──────────────────────────────── */
+    .chart-wrap {
+      flex: 1;
+      overflow: auto;
+      padding: 16px;
+      display: flex;
+      justify-content: center;
+      align-items: flex-start;
+    }
+
+    #chart { display: block; }
+
+    /* SVG styles */
+    .grid-minor { stroke: #1e262e; stroke-width: .5; }
+    .grid-major { stroke: #2a3540; stroke-width: 1; }
+    .grid-axis  { stroke: #3d4f5c; stroke-width: 1.5; }
+    .bumper-bar { stroke: #7d8590; stroke-width: 3; stroke-linecap: round; }
+    .center-line { stroke: #444; stroke-width: 1; stroke-dasharray: 4 4; }
+    .dist-ring { stroke: #2a3540; stroke-width: 1; fill: none; stroke-dasharray: 3 5; }
+    .axis-label { font-size: 9px; fill: #6e7681; font-family: monospace; }
+    .sensor-dot { stroke: white; stroke-width: 1.5; }
+    .sensor-label { font-size: 11px; font-weight: 600; font-family: 'Segoe UI', sans-serif; }
+    .dist-label { font-size: 9px; fill: #6e7681; font-family: monospace; }
+    .fov-sector { opacity: .35; }
+    .fov-outline { fill: none; stroke-width: 1.5; opacity: .8; }
+    .centerline { stroke-width: 1.5; opacity: .7; stroke-dasharray: 6 4; }
+
+    /* ── Info bar ─────────────────────────────────── */
+    .info-bar {
+      background: var(--panel);
+      border-top: 1px solid var(--border);
+      padding: 8px 16px;
+      flex-shrink: 0;
+    }
+    .info-grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 12px;
+    }
+    .info-cell { display: flex; flex-direction: column; gap: 2px; }
+    .info-cell .label { font-size: 10px; color: var(--muted); }
+    .info-cell .value { font-size: 11px; font-family: monospace; }
+    .info-cell .value span { color: var(--muted); }
+
+    /* ── Distance table ───────────────────────────── */
+    .dist-table-wrap {
+      background: var(--panel);
+      border-top: 1px solid var(--border);
+      padding: 6px 16px 8px;
+      flex-shrink: 0;
+    }
+    .dist-table-title { font-size: 10px; color: var(--muted); letter-spacing: .5px; text-transform: uppercase; margin-bottom: 4px; }
+    .dist-table {
+      display: flex;
+      gap: 24px;
+      flex-wrap: wrap;
+    }
+    .dist-item { font-size: 11px; font-family: monospace; color: var(--muted); }
+    .dist-item strong { color: var(--text); }
+
+    /* Scrollbar styling */
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: #30363d; border-radius: 3px; }
+  </style>
+</head>
+<body>
+
+<header>
+  <h1>Parking Sensor FOV Simulator</h1>
+  <span>ISO 17386 · Top-Down View · Rear Bumper · 10cm × 10cm Grid</span>
+</header>
+
+<div class="main">
+
+  <!-- ── Controls ──────────────────────────────────── -->
+  <div class="controls" id="controlsPanel">
+
+    <!-- Global Bumper Geometry -->
+    <div>
+      <div class="section-title">Bumper Geometry</div>
+      <div class="global-controls" id="globalControls"></div>
+    </div>
+
+    <!-- Per-sensor cards -->
+    <div>
+      <div class="section-title">Sensor Configuration</div>
+      <div id="sensorCards"></div>
+    </div>
+
+    <!-- FOV Defaults -->
+    <div>
+      <div class="section-title">FOV Defaults (all sensors)</div>
+      <div id="fovDefaults"></div>
+    </div>
+
+  </div>
+
+  <!-- ── Right area ─────────────────────────────────── -->
+  <div class="right">
+
+    <div class="chart-wrap">
+      <svg id="chart"></svg>
+    </div>
+
+    <!-- Info bar: sensor positions -->
+    <div class="info-bar">
+      <div class="info-grid" id="infoGrid"></div>
+    </div>
+
+    <!-- Distance table -->
+    <div class="dist-table-wrap">
+      <div class="dist-table-title">Inter-Sensor Distances</div>
+      <div class="dist-table" id="distTable"></div>
+    </div>
+
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════ -->
+<script>
+// ─── Constants ────────────────────────────────────────────────
+const CHART_W_CM = 300;   // total lateral width  (y axis: -150 to +150)
+const CHART_H_CM = 160;   // total depth          (x axis:    0 to  160)
+const GRID_CM    = 10;    // grid block size
+const SCALE      = 3;     // px per cm
+
+// SVG margins
+const M = { top: 56, left: 56, right: 24, bottom: 36 };
+const SVG_W = CHART_W_CM * SCALE + M.left + M.right;
+const SVG_H = CHART_H_CM * SCALE + M.top  + M.bottom;
+
+// Origin in SVG coords: physical (0,0) = center of bumper face
+const OX = M.left + 150 * SCALE;   // SVG x at physical y = 0
+const OY = M.top;                   // SVG y at physical x = 0 (bumper)
+
+// ─── Physical → SVG coordinate transform ──────────────────────
+// Physical: x = depth (away from car, 0→160cm), y = lateral (+y right of chart = left of car)
+// SVG: x right, y down
+function toSVG(px, py) {
+  return { x: OX + py * SCALE, y: OY + px * SCALE };
+}
+
+// Degrees → radians
+const deg2rad = d => d * Math.PI / 180;
+
+// ─── Sensor State ─────────────────────────────────────────────
+// Positions in physical space:
+//   x = 0  (flush with bumper face)
+//   y = lateral offset (+ = left of car, - = right of car)
+//   z = mounting height above ground (cm)
+//   yaw: rotation around z-axis, 0 = pointing straight back (+x dir)
+//         + yaw → rotates toward +y (left of car)
+//         - yaw → rotates toward -y (right of car)
+//   pitch: rotation around sensor's y-axis, + = nose up
+//   roll:  rotation around sensor's x-axis
+const state = {
+  // Global bumper geometry
+  rlc_rrc_spacing: 70,   // distance between RLC and RRC (cm), symmetric about y=0
+  rl_rlc_spacing:  30,   // distance from RL to RLC (outward, cm)
+  rr_rrc_spacing:  30,   // distance from RR to RRC (outward, cm)
+
+  sensors: {
+    RL:  { x: 0, y:  65, z: 50, yaw:  45, pitch: -5, roll: 0, enabled: true },
+    RLC: { x: 0, y:  35, z: 50, yaw:   0, pitch: -5, roll: 0, enabled: true },
+    RRC: { x: 0, y: -35, z: 50, yaw:   0, pitch: -5, roll: 0, enabled: true },
+    RR:  { x: 0, y: -65, z: 50, yaw: -45, pitch: -5, roll: 0, enabled: true },
+  },
+
+  // FOV defaults applied to all sensors (overrideable per sensor in future)
+  hFOV_half: 30,    // horizontal half-angle (degrees)
+  vFOV_half: 20,    // vertical half-angle (degrees)
+  range: 150,       // max detection range (cm)
+};
+
+// Sensor display metadata
+const SENSOR_META = {
+  RL:  { label: 'RL',  fullName: 'Rear Left Corner',       color: '#2ea87e', cssVar: '--col-rl'  },
+  RLC: { label: 'RLC', fullName: 'Rear Left Center',       color: '#457bcd', cssVar: '--col-rlc' },
+  RRC: { label: 'RRC', fullName: 'Rear Right Center',      color: '#e63950', cssVar: '--col-rrc' },
+  RR:  { label: 'RR',  fullName: 'Rear Right Corner',      color: '#ff7b54', cssVar: '--col-rr'  },
+};
+const SENSOR_ORDER = ['RL', 'RLC', 'RRC', 'RR'];
+
+// ─── Sync geometric state after spacing changes ─────────────────
+function syncPositions() {
+  const hs = state.rlc_rrc_spacing / 2;  // half spacing
+  state.sensors.RLC.y =  hs;
+  state.sensors.RRC.y = -hs;
+  state.sensors.RL.y  =  hs + state.rl_rlc_spacing;
+  state.sensors.RR.y  = -(hs + state.rr_rrc_spacing);
+}
+
+// ─── SVG helpers ───────────────────────────────────────────────
+function svgEl(tag, attrs = {}, text = '') {
+  const e = document.createElementNS('http://www.w3.org/2000/svg', tag);
+  for (const [k, v] of Object.entries(attrs)) e.setAttribute(k, v);
+  if (text) e.textContent = text;
+  return e;
+}
+
+// Arc point at physical angle `alpha` (from +x axis, radians) and range R
+function arcPt(sensorX, sensorY, alpha, R) {
+  // physical point: (sensorX + R*cos(alpha), sensorY + R*sin(alpha))
+  return toSVG(sensorX + R * Math.cos(alpha), sensorY + R * Math.sin(alpha));
+}
+
+// SVG arc path for FOV sector
+function fovPath(sensor, hFOV_half_deg, range) {
+  const { x: sx, y: sy } = sensor;
+  const center = toSVG(sx, sy);
+  const yaw = deg2rad(sensor.yaw);
+  const hh  = deg2rad(hFOV_half_deg);
+
+  const left  = arcPt(sx, sy, yaw - hh, range);
+  const right = arcPt(sx, sy, yaw + hh, range);
+
+  const R = range * SCALE;
+  const largeArc = hFOV_half_deg * 2 >= 180 ? 1 : 0;
+
+  // M center → L left edge → arc clockwise to right edge → Z
+  // sweep=0 (CCW): from left boundary to right boundary goes counter-clockwise
+  // in SVG (y-down), which traces the bottom arc (away from bumper) ✓
+  return [
+    `M ${center.x.toFixed(1)} ${center.y.toFixed(1)}`,
+    `L ${left.x.toFixed(1)} ${left.y.toFixed(1)}`,
+    `A ${R} ${R} 0 ${largeArc} 0 ${right.x.toFixed(1)} ${right.y.toFixed(1)}`,
+    'Z'
+  ].join(' ');
+}
+
+// Center line path for a sensor
+function centerLinePath(sensor, range) {
+  const { x: sx, y: sy } = sensor;
+  const c = toSVG(sx, sy);
+  const tip = arcPt(sx, sy, deg2rad(sensor.yaw), range);
+  return `M ${c.x.toFixed(1)} ${c.y.toFixed(1)} L ${tip.x.toFixed(1)} ${tip.y.toFixed(1)}`;
+}
+
+// ─── Chart drawing ─────────────────────────────────────────────
+function drawChart() {
+  const svg = document.getElementById('chart');
+  svg.setAttribute('width',  SVG_W);
+  svg.setAttribute('height', SVG_H);
+  svg.setAttribute('viewBox', `0 0 ${SVG_W} ${SVG_H}`);
+  svg.innerHTML = '';
+
+  // ── Clip rect so arcs don't bleed outside chart ──
+  const defs = svgEl('defs');
+
+  // Clip path
+  const clip = svgEl('clipPath', { id: 'chartClip' });
+  clip.appendChild(svgEl('rect', {
+    x: M.left, y: M.top,
+    width: CHART_W_CM * SCALE, height: CHART_H_CM * SCALE
+  }));
+  defs.appendChild(clip);
+
+  // Arrowhead markers for each sensor's beam direction indicator
+  for (const id of SENSOR_ORDER) {
+    const meta = SENSOR_META[id];
+    const marker = svgEl('marker', {
+      id: `arrow-${id}`,
+      markerWidth: 6, markerHeight: 6,
+      refX: 5, refY: 2,
+      orient: 'auto'
+    });
+    marker.appendChild(svgEl('path', {
+      d: 'M 0 0 L 5 2 L 0 4 Z',
+      fill: meta.color
+    }));
+    defs.appendChild(marker);
+  }
+
+  svg.appendChild(defs);
+
+  // ── Background ──
+  svg.appendChild(svgEl('rect', {
+    x: M.left, y: M.top,
+    width: CHART_W_CM * SCALE, height: CHART_H_CM * SCALE,
+    fill: '#0b1117'
+  }));
+
+  // ── Grid group ──
+  const gridG = svgEl('g', { 'clip-path': 'url(#chartClip)' });
+
+  // Minor grid lines (every 10cm)
+  for (let y = -150; y <= 150; y += GRID_CM) {
+    const svgX = OX + y * SCALE;
+    const isMaj = y % 50 === 0;
+    gridG.appendChild(svgEl('line', {
+      x1: svgX, y1: M.top, x2: svgX, y2: M.top + CHART_H_CM * SCALE,
+      class: isMaj ? 'grid-major' : 'grid-minor'
+    }));
+  }
+  for (let x = 0; x <= CHART_H_CM; x += GRID_CM) {
+    const svgY = OY + x * SCALE;
+    const isMaj = x % 50 === 0;
+    gridG.appendChild(svgEl('line', {
+      x1: M.left, y1: svgY, x2: M.left + CHART_W_CM * SCALE, y2: svgY,
+      class: isMaj ? 'grid-major' : 'grid-minor'
+    }));
+  }
+
+  // Center line (y = 0, vertical)
+  gridG.appendChild(svgEl('line', {
+    x1: OX, y1: M.top, x2: OX, y2: M.top + CHART_H_CM * SCALE,
+    class: 'center-line'
+  }));
+
+  // Distance rings from center-y (x=0) — arcs at 50, 100, 150cm
+  for (const d of [50, 100, 150]) {
+    const R = d * SCALE;
+    const oy = OY; // bumper line
+    // Draw semi-circle arc into the chart
+    const lx = OX - R, rx = OX + R;
+    // sweep=0 so arc goes downward (CCW in SVG y-down = bottom semicircle into chart)
+    gridG.appendChild(svgEl('path', {
+      d: `M ${lx} ${oy} A ${R} ${R} 0 0 0 ${rx} ${oy}`,
+      class: 'dist-ring'
+    }));
+    // Ring label
+    gridG.appendChild(svgEl('text', {
+      x: OX + 3, y: oy + R - 2,
+      class: 'dist-label'
+    }, `${d}cm`));
+  }
+
+  svg.appendChild(gridG);
+
+  // ── Axis labels ──
+  const labG = svgEl('g');
+
+  // Y-axis labels (lateral, cm)
+  for (let y = -150; y <= 150; y += 50) {
+    const svgX = OX + y * SCALE;
+    labG.appendChild(svgEl('text', {
+      x: svgX, y: M.top - 6,
+      class: 'axis-label',
+      'text-anchor': 'middle'
+    }, y === 0 ? '0' : `${y}`));
+  }
+  labG.appendChild(svgEl('text', {
+    x: M.left + CHART_W_CM * SCALE / 2,
+    y: M.top - 22,
+    class: 'axis-label',
+    'text-anchor': 'middle',
+    fill: '#8b949e'
+  }, '← Right of vehicle (RR/RRC)      y (cm)      (RL/RLC) Left of vehicle →'));
+
+  // X-axis labels (depth, cm)
+  for (let x = 0; x <= CHART_H_CM; x += 50) {
+    const svgY = OY + x * SCALE;
+    labG.appendChild(svgEl('text', {
+      x: M.left - 6, y: svgY + 3,
+      class: 'axis-label',
+      'text-anchor': 'end'
+    }, `${x}`));
+  }
+  // Rotated x label
+  const xLabelG = svgEl('g', { transform: `translate(${M.left - 38},${M.top + CHART_H_CM*SCALE/2}) rotate(-90)` });
+  xLabelG.appendChild(svgEl('text', {
+    x: 0, y: 0,
+    class: 'axis-label',
+    'text-anchor': 'middle'
+  }, 'x · depth (cm, away from bumper)'));
+  labG.appendChild(xLabelG);
+
+  svg.appendChild(labG);
+
+  // ── Bumper bar ──
+  const bumperY = OY;
+  const bumpG = svgEl('g');
+  bumpG.appendChild(svgEl('line', {
+    x1: M.left, y1: bumperY,
+    x2: M.left + CHART_W_CM * SCALE, y2: bumperY,
+    class: 'bumper-bar'
+  }));
+  bumpG.appendChild(svgEl('text', {
+    x: M.left + 4, y: bumperY - 5,
+    class: 'axis-label', fill: '#8b949e'
+  }, '▲ BUMPER FACE'));
+  svg.appendChild(bumpG);
+
+  // ── FOV sectors (clipped) ──
+  const fovG = svgEl('g', { 'clip-path': 'url(#chartClip)' });
+
+  for (const id of SENSOR_ORDER) {
+    const sensor = state.sensors[id];
+    const meta   = SENSOR_META[id];
+    if (!sensor.enabled) continue;
+
+    const pd = fovPath(sensor, state.hFOV_half, state.range);
+
+    // Filled sector
+    fovG.appendChild(svgEl('path', {
+      d: pd, fill: meta.color, class: 'fov-sector'
+    }));
+    // Outline
+    fovG.appendChild(svgEl('path', {
+      d: pd, stroke: meta.color, class: 'fov-outline'
+    }));
+    // Center line of beam
+    fovG.appendChild(svgEl('path', {
+      d: centerLinePath(sensor, state.range),
+      stroke: meta.color, fill: 'none', class: 'centerline'
+    }));
+  }
+  svg.appendChild(fovG);
+
+  // ── Sensor markers (on top of FOV) ──
+  const markerG = svgEl('g');
+  for (const id of SENSOR_ORDER) {
+    const sensor = state.sensors[id];
+    const meta   = SENSOR_META[id];
+    if (!sensor.enabled) continue;
+
+    const sv = toSVG(sensor.x, sensor.y);
+
+    // Dot
+    markerG.appendChild(svgEl('circle', {
+      cx: sv.x, cy: sv.y, r: 6,
+      fill: meta.color, class: 'sensor-dot'
+    }));
+
+    // Label: offset above bumper line, anchor toward center
+    markerG.appendChild(svgEl('text', {
+      x: sv.x, y: sv.y - 10,
+      class: 'sensor-label',
+      fill: meta.color,
+      'text-anchor': sensor.y >= 0 ? 'start' : 'end'
+    }, id));
+
+    // Small angle indicator arrow
+    const yawRad = deg2rad(sensor.yaw);
+    const arrowLen = 18;
+    const ax = sv.x + Math.sin(yawRad) * arrowLen;
+    const ay = sv.y + Math.cos(yawRad) * arrowLen;
+    markerG.appendChild(svgEl('line', {
+      x1: sv.x, y1: sv.y, x2: ax, y2: ay,
+      stroke: meta.color, 'stroke-width': 1.5,
+      'marker-end': `url(#arrow-${id})`
+    }));
+  }
+  svg.appendChild(markerG);
+
+  // ── Legend ──
+  const legG = svgEl('g');
+  let lx0 = M.left + 8;
+  const ly0 = M.top + CHART_H_CM * SCALE + 8;
+  for (const id of SENSOR_ORDER) {
+    const meta = SENSOR_META[id];
+    const sensor = state.sensors[id];
+    legG.appendChild(svgEl('rect', { x: lx0, y: ly0, width: 10, height: 10, fill: meta.color, rx: 2 }));
+    legG.appendChild(svgEl('text', { x: lx0 + 13, y: ly0 + 9, class: 'axis-label', fill: meta.color }, id));
+    legG.appendChild(svgEl('text', {
+      x: lx0 + 13, y: ly0 + 9 + 11,
+      class: 'axis-label', fill: '#6e7681'
+    }, `y=${sensor.y.toFixed(0)} yaw=${sensor.yaw.toFixed(0)}°`));
+    lx0 += 72;
+  }
+  svg.appendChild(legG);
+}
+
+// ─── Info bar ──────────────────────────────────────────────────
+function updateInfoBar() {
+  const grid = document.getElementById('infoGrid');
+  grid.innerHTML = '';
+
+  for (const id of SENSOR_ORDER) {
+    const sensor = state.sensors[id];
+    const meta   = SENSOR_META[id];
+    const cell   = document.createElement('div');
+    cell.className = 'info-cell';
+    cell.innerHTML = `
+      <div class="label" style="color:${meta.color}">${id} · ${meta.fullName}</div>
+      <div class="value">
+        x=${sensor.x.toFixed(0)}, y=${sensor.y.toFixed(0)}, z=${sensor.z.toFixed(0)} <span>cm</span>
+      </div>
+      <div class="value">
+        yaw=${sensor.yaw.toFixed(0)}° pitch=${sensor.pitch.toFixed(0)}° roll=${sensor.roll.toFixed(0)}°
+      </div>
+    `;
+    grid.appendChild(cell);
+  }
+}
+
+// ─── Distance table ────────────────────────────────────────────
+function dist2D(a, b) {
+  return Math.sqrt((a.x - b.x) ** 2 + (a.y - b.y) ** 2);
+}
+
+function updateDistTable() {
+  const wrap = document.getElementById('distTable');
+  wrap.innerHTML = '';
+
+  const s = state.sensors;
+  const pairs = [
+    ['RLC', 'RRC', 'RLC↔RRC'],
+    ['RL',  'RLC', 'RL↔RLC'],
+    ['RR',  'RRC', 'RR↔RRC'],
+    ['RL',  'RR',  'RL↔RR'],
+    ['RL',  'RRC', 'RL↔RRC'],
+    ['RR',  'RLC', 'RR↔RLC'],
+  ];
+
+  for (const [a, b, label] of pairs) {
+    const d = dist2D(s[a], s[b]);
+    const item = document.createElement('div');
+    item.className = 'dist-item';
+    item.innerHTML = `${label}: <strong>${d.toFixed(1)} cm</strong>`;
+    wrap.appendChild(item);
+  }
+
+  // Distance from center (0,0) for each sensor
+  for (const id of SENSOR_ORDER) {
+    const sensor = s[id];
+    const d = dist2D(sensor, { x: 0, y: 0 });
+    const item = document.createElement('div');
+    item.className = 'dist-item';
+    item.innerHTML = `${id}↔center: <strong>${d.toFixed(1)} cm</strong>`;
+    wrap.appendChild(item);
+  }
+}
+
+// ─── Control panel builder ──────────────────────────────────────
+function makeSlider(labelText, min, max, step, _unused, getVal, setVal, unit = '') {
+  const row = document.createElement('div');
+  row.className = 'row';
+
+  const label = document.createElement('label');
+  label.textContent = labelText;
+
+  const slider = document.createElement('input');
+  slider.type  = 'range';
+  slider.min   = min;
+  slider.max   = max;
+  slider.step  = step;
+  slider.value = getVal();
+
+  const val = document.createElement('div');
+  val.className = 'val';
+  val.textContent = `${parseFloat(getVal()).toFixed(unit === '°' ? 0 : 0)}${unit}`;
+
+  slider.addEventListener('input', () => {
+    setVal(parseFloat(slider.value));
+    val.textContent = `${parseFloat(slider.value).toFixed(0)}${unit}`;
+    redraw();
+  });
+
+  row.append(label, slider, val);
+  return row;
+}
+
+// Update all per-sensor y sliders to reflect state (called after global spacing changes)
+function syncYSliders() {
+  for (const id of SENSOR_ORDER) {
+    const sliderWrap = document.getElementById(`slider-y-${id}`);
+    if (!sliderWrap) continue;
+    const input = sliderWrap.querySelector('input[type=range]');
+    const valEl = sliderWrap.querySelector('.val');
+    const newY = state.sensors[id].y;
+    if (input) input.value = newY;
+    if (valEl) valEl.textContent = `${newY.toFixed(0)} cm`;
+    updatePosInfo(id);
+  }
+}
+
+function buildGlobalControls() {
+  const wrap = document.getElementById('globalControls');
+  wrap.innerHTML = '';
+
+  wrap.appendChild(makeSlider(
+    'RLC↔RRC', 20, 150, 2,
+    'rlc_rrc_spacing',
+    () => state.rlc_rrc_spacing,
+    v => { state.rlc_rrc_spacing = v; syncPositions(); syncYSliders(); },
+    ' cm'
+  ));
+  wrap.appendChild(makeSlider(
+    'RL↔RLC', 0, 80, 1,
+    'rl_rlc_spacing',
+    () => state.rl_rlc_spacing,
+    v => { state.rl_rlc_spacing = v; syncPositions(); syncYSliders(); },
+    ' cm'
+  ));
+  wrap.appendChild(makeSlider(
+    'RR↔RRC', 0, 80, 1,
+    'rr_rrc_spacing',
+    () => state.rr_rrc_spacing,
+    v => { state.rr_rrc_spacing = v; syncPositions(); syncYSliders(); },
+    ' cm'
+  ));
+}
+
+function buildSensorCards() {
+  const wrap = document.getElementById('sensorCards');
+  wrap.innerHTML = '';
+
+  for (const id of SENSOR_ORDER) {
+    const sensor = state.sensors[id];
+    const meta   = SENSOR_META[id];
+
+    const card = document.createElement('div');
+    card.className = 'sensor-card';
+    card.id = `card-${id}`;
+
+    // Header
+    const header = document.createElement('div');
+    header.className = 'sensor-header';
+    header.innerHTML = `
+      <div class="swatch" style="background:${meta.color}"></div>
+      <div class="name">${id}</div>
+      <div class="pos-info" id="posinfo-${id}">y=${sensor.y.toFixed(0)} yaw=${sensor.yaw.toFixed(0)}°</div>
+      <div class="chevron">▶</div>
+    `;
+    header.addEventListener('click', () => {
+      card.classList.toggle('open');
+    });
+
+    const body = document.createElement('div');
+    body.className = 'sensor-body';
+
+    // Position section
+    const posLabel = document.createElement('div');
+    posLabel.className = 'sub-section';
+    posLabel.textContent = 'POSITION';
+    body.appendChild(posLabel);
+
+    // x offset from bumper
+    body.appendChild(makeSlider(
+      'x offset', -10, 20, 1, `${id}_x`,
+      () => sensor.x,
+      v => { sensor.x = v; updatePosInfo(id); }, ' cm'
+    ));
+
+    // y lateral (read-only display - driven by global spacing, but allow fine-tune)
+    const yRow = makeSlider(
+      'y lateral', -150, 150, 1, `${id}_y`,
+      () => sensor.y,
+      v => { sensor.y = v; updatePosInfo(id); }, ' cm'
+    );
+    yRow.id = `slider-y-${id}`;
+    body.appendChild(yRow);
+
+    // z height
+    body.appendChild(makeSlider(
+      'z height', 20, 100, 1, `${id}_z`,
+      () => sensor.z,
+      v => { sensor.z = v; }, ' cm'
+    ));
+
+    // Orientation section
+    const angLabel = document.createElement('div');
+    angLabel.className = 'sub-section';
+    angLabel.textContent = 'MOUNTING ANGLE';
+    body.appendChild(angLabel);
+
+    body.appendChild(makeSlider(
+      'yaw', -90, 90, 1, `${id}_yaw`,
+      () => sensor.yaw,
+      v => { sensor.yaw = v; updatePosInfo(id); }, '°'
+    ));
+    body.appendChild(makeSlider(
+      'pitch', -30, 30, 1, `${id}_pitch`,
+      () => sensor.pitch,
+      v => { sensor.pitch = v; }, '°'
+    ));
+    body.appendChild(makeSlider(
+      'roll', -20, 20, 1, `${id}_roll`,
+      () => sensor.roll,
+      v => { sensor.roll = v; }, '°'
+    ));
+
+    card.appendChild(header);
+    card.appendChild(body);
+    wrap.appendChild(card);
+  }
+}
+
+function buildFOVDefaults() {
+  const wrap = document.getElementById('fovDefaults');
+  wrap.innerHTML = '';
+
+  wrap.appendChild(makeSlider(
+    'H-FOV ±', 5, 90, 1, 'hFOV_half',
+    () => state.hFOV_half,
+    v => { state.hFOV_half = v; }, '°'
+  ));
+  wrap.appendChild(makeSlider(
+    'V-FOV ±', 5, 60, 1, 'vFOV_half',
+    () => state.vFOV_half,
+    v => { state.vFOV_half = v; }, '°'
+  ));
+  wrap.appendChild(makeSlider(
+    'Range', 10, 300, 5, 'range',
+    () => state.range,
+    v => { state.range = v; }, ' cm'
+  ));
+}
+
+function updatePosInfo(id) {
+  const sensor = state.sensors[id];
+  const el = document.getElementById(`posinfo-${id}`);
+  if (el) el.textContent = `y=${sensor.y.toFixed(0)} yaw=${sensor.yaw.toFixed(0)}°`;
+  // Also sync global spacing display if y was changed from global
+}
+
+// ─── Global redraw ─────────────────────────────────────────────
+function redraw() {
+  drawChart();
+  updateInfoBar();
+  updateDistTable();
+}
+
+// ─── Init ──────────────────────────────────────────────────────
+function init() {
+  syncPositions();
+  buildGlobalControls();
+  buildSensorCards();
+  buildFOVDefaults();
+  redraw();
+}
+
+window.addEventListener('DOMContentLoaded', init);
+window.addEventListener('resize', () => redraw());
+</script>
+
+</body>
+</html>
