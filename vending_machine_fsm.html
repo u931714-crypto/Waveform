@@ -1,0 +1,797 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Vending Machine FSM</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: 'Segoe UI', system-ui, sans-serif;
+    background: #0f172a;
+    color: #e2e8f0;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 20px;
+  }
+  h1 { font-size: 1.6rem; margin-bottom: 16px; color: #38bdf8; }
+
+  .container {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 20px;
+    max-width: 1100px;
+    width: 100%;
+  }
+
+  .panel {
+    background: #1e293b;
+    border-radius: 12px;
+    padding: 20px;
+    border: 1px solid #334155;
+  }
+  .panel h2 {
+    font-size: 1.1rem;
+    margin-bottom: 14px;
+    color: #94a3b8;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    font-weight: 600;
+  }
+
+  /* --- FSM Diagram --- */
+  .diagram-panel { grid-column: 1 / -1; }
+  svg text { font-family: 'Segoe UI', system-ui, sans-serif; }
+
+  .state-node rect {
+    rx: 10; ry: 10;
+    stroke-width: 2;
+    transition: fill 0.3s, stroke 0.3s, filter 0.3s;
+  }
+  .state-node text {
+    fill: #e2e8f0;
+    font-size: 13px;
+    font-weight: 600;
+    text-anchor: middle;
+    dominant-baseline: central;
+    pointer-events: none;
+  }
+  .state-node rect.inactive { fill: #334155; stroke: #475569; }
+  .state-node rect.active   { fill: #0ea5e9; stroke: #38bdf8; filter: drop-shadow(0 0 8px rgba(56,189,248,0.5)); }
+
+  .edge line, .edge path { stroke: #475569; stroke-width: 1.5; fill: none; marker-end: url(#arrowhead); transition: stroke 0.3s; }
+  .edge text { fill: #94a3b8; font-size: 10px; }
+  .edge.active line, .edge.active path { stroke: #38bdf8; stroke-width: 2.5; }
+  .edge.active text { fill: #38bdf8; font-weight: 600; }
+
+  /* --- Controls --- */
+  .coin-buttons, .item-grid, .action-buttons { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 14px; }
+  .coin-buttons button {
+    padding: 10px 18px;
+    border-radius: 50px;
+    border: 2px solid #facc15;
+    background: #422006;
+    color: #facc15;
+    font-weight: 700;
+    font-size: 0.95rem;
+    cursor: pointer;
+    transition: background 0.2s;
+  }
+  .coin-buttons button:hover { background: #713f12; }
+
+  .item-grid button {
+    padding: 12px 16px;
+    border-radius: 8px;
+    border: 1px solid #475569;
+    background: #1e293b;
+    color: #e2e8f0;
+    cursor: pointer;
+    min-width: 100px;
+    text-align: left;
+    transition: background 0.2s, border-color 0.2s;
+  }
+  .item-grid button:hover { background: #334155; border-color: #38bdf8; }
+  .item-grid button.out-of-stock {
+    opacity: 0.4;
+    text-decoration: line-through;
+    cursor: not-allowed;
+  }
+  .item-grid button .stock { font-size: 0.75rem; color: #94a3b8; display: block; }
+
+  .action-buttons button {
+    padding: 10px 22px;
+    border-radius: 8px;
+    border: none;
+    font-weight: 600;
+    font-size: 0.9rem;
+    cursor: pointer;
+    transition: background 0.2s;
+  }
+  .btn-cancel { background: #dc2626; color: #fff; }
+  .btn-cancel:hover { background: #ef4444; }
+  .btn-timeout { background: #f59e0b; color: #1e293b; }
+  .btn-timeout:hover { background: #fbbf24; }
+  .btn-reset { background: #475569; color: #e2e8f0; }
+  .btn-reset:hover { background: #64748b; }
+
+  /* --- Status --- */
+  .status-row {
+    display: flex;
+    justify-content: space-between;
+    padding: 8px 0;
+    border-bottom: 1px solid #334155;
+  }
+  .status-row:last-child { border-bottom: none; }
+  .status-label { color: #94a3b8; }
+  .status-value { font-weight: 600; }
+  #statusState { color: #38bdf8; }
+  #statusBalance { color: #4ade80; }
+  #statusSelected { color: #facc15; }
+
+  /* --- Log --- */
+  .log-panel { grid-column: 1 / -1; }
+  #log {
+    height: 180px;
+    overflow-y: auto;
+    background: #0f172a;
+    border-radius: 8px;
+    padding: 10px;
+    font-family: 'Cascadia Code', 'Fira Code', monospace;
+    font-size: 0.82rem;
+    line-height: 1.6;
+    border: 1px solid #334155;
+  }
+  .log-entry { padding: 2px 0; }
+  .log-entry .time { color: #64748b; margin-right: 8px; }
+  .log-entry.event { color: #38bdf8; }
+  .log-entry.action { color: #4ade80; }
+  .log-entry.error { color: #f87171; }
+  .log-entry.change { color: #facc15; }
+
+  /* Transition table */
+  .table-panel { grid-column: 1 / -1; }
+  table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+  th { text-align: left; padding: 8px 10px; background: #334155; color: #94a3b8; font-weight: 600; }
+  td { padding: 8px 10px; border-bottom: 1px solid #1e293b; }
+  tr:hover td { background: #334155; }
+  tr.active-row td { background: #0c4a6e; }
+
+  /* --- Data Stream Monitor --- */
+  .stream-panel { grid-column: 1 / -1; }
+  .stream-stats {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: 12px;
+    margin-bottom: 14px;
+  }
+  .stream-stat {
+    background: #0f172a;
+    border: 1px solid #334155;
+    border-radius: 8px;
+    padding: 12px;
+    text-align: center;
+  }
+  .stream-stat .label { font-size: 0.7rem; color: #64748b; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 4px; }
+  .stream-stat .value { font-size: 1.3rem; font-weight: 700; font-family: 'Cascadia Code', 'Fira Code', monospace; }
+  .stream-stat .unit { font-size: 0.7rem; color: #64748b; margin-left: 2px; }
+  #streamTotalBytes .value { color: #38bdf8; }
+  #streamEventBytes .value { color: #4ade80; }
+  #streamStateBytes .value { color: #facc15; }
+  #streamEventCount .value { color: #a78bfa; }
+  #streamAvgSize .value { color: #fb923c; }
+  #streamThroughput .value { color: #f472b6; }
+
+  .throughput-bar-bg {
+    width: 100%;
+    height: 8px;
+    background: #1e293b;
+    border-radius: 4px;
+    overflow: hidden;
+    margin-top: 12px;
+  }
+  .throughput-bar-fill {
+    height: 100%;
+    background: linear-gradient(90deg, #38bdf8, #a78bfa, #f472b6);
+    border-radius: 4px;
+    transition: width 0.4s ease;
+    width: 0%;
+  }
+
+  #streamLog {
+    height: 140px;
+    overflow-y: auto;
+    background: #0f172a;
+    border-radius: 8px;
+    padding: 10px;
+    font-family: 'Cascadia Code', 'Fira Code', monospace;
+    font-size: 0.78rem;
+    line-height: 1.5;
+    border: 1px solid #334155;
+    margin-top: 10px;
+  }
+  .stream-entry { padding: 1px 0; color: #94a3b8; }
+  .stream-entry .hex { color: #64748b; font-size: 0.72rem; }
+  .stream-entry .sz { color: #38bdf8; font-weight: 600; }
+  .stream-entry .dir-in  { color: #4ade80; }
+  .stream-entry .dir-out { color: #facc15; }
+</style>
+</head>
+<body>
+
+<h1>Vending Machine FSM</h1>
+
+<div class="container">
+
+  <!-- FSM Diagram -->
+  <div class="panel diagram-panel">
+    <h2>State Diagram</h2>
+    <svg id="fsmSvg" viewBox="0 0 800 340" width="100%" height="340">
+      <defs>
+        <marker id="arrowhead" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
+          <polygon points="0 0, 8 3, 0 6" fill="#475569"/>
+        </marker>
+        <marker id="arrowhead-active" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
+          <polygon points="0 0, 8 3, 0 6" fill="#38bdf8"/>
+        </marker>
+      </defs>
+
+      <!-- Edges (drawn first, behind nodes) -->
+      <g class="edge" id="edge-IDLE-SELECT">
+        <line x1="155" y1="60" x2="295" y2="60"/>
+        <text x="225" y="50">INSERT_COIN</text>
+      </g>
+      <g class="edge" id="edge-SELECT-PAYMENT">
+        <line x1="400" y1="90" x2="400" y2="145"/>
+        <text x="405" y="122">SELECT_ITEM&#10;(need more)</text>
+      </g>
+      <g class="edge" id="edge-SELECT-DISPENSE">
+        <line x1="455" y1="60" x2="585" y2="60"/>
+        <text x="510" y="50">SELECT_ITEM (paid)</text>
+      </g>
+      <g class="edge" id="edge-SELECT-ERROR">
+        <path d="M 370,90 Q 250,200 155,245"/>
+        <text x="220" y="180">SELECT_ITEM&#10;(no stock)</text>
+      </g>
+      <g class="edge" id="edge-SELECT-CHANGE">
+        <path d="M 320,90 Q 280,200 540,245"/>
+        <text x="340" y="210">CANCEL</text>
+      </g>
+      <g class="edge" id="edge-PAYMENT-DISPENSE">
+        <line x1="455" y1="170" x2="585" y2="80"/>
+        <text x="530" y="115">INSERT_COIN (enough)</text>
+      </g>
+      <g class="edge" id="edge-PAYMENT-PAYMENT">
+        <path d="M 455,180 Q 500,210 455,190" />
+        <text x="470" y="210">INSERT_COIN (more)</text>
+      </g>
+      <g class="edge" id="edge-PAYMENT-CHANGE">
+        <line x1="455" y1="190" x2="555" y2="250"/>
+        <text x="530" y="230">CANCEL</text>
+      </g>
+      <g class="edge" id="edge-DISPENSE-CHANGE">
+        <line x1="640" y1="90" x2="620" y2="235"/>
+        <text x="650" y="165">DISPENSE_DONE</text>
+      </g>
+      <g class="edge" id="edge-DISPENSE-IDLE">
+        <path d="M 680,90 Q 750,20 155,45"/>
+        <text x="450" y="18">exact (no change)</text>
+      </g>
+      <g class="edge" id="edge-CHANGE-IDLE">
+        <path d="M 555,260 Q 300,320 100,85"/>
+        <text x="280" y="310">return change</text>
+      </g>
+      <g class="edge" id="edge-ERROR-IDLE">
+        <line x1="100" y1="240" x2="100" y2="90"/>
+        <text x="40" y="170">refund</text>
+      </g>
+
+      <!-- State Nodes -->
+      <g class="state-node" id="node-IDLE">
+        <rect x="45" y="35" width="110" height="50" class="active"/>
+        <text x="100" y="60">IDLE</text>
+      </g>
+      <g class="state-node" id="node-SELECT">
+        <rect x="295" y="35" width="110" height="50" class="inactive"/>
+        <text x="350" y="60">SELECT</text>
+      </g>
+      <g class="state-node" id="node-PAYMENT">
+        <rect x="345" y="145" width="110" height="50" class="inactive"/>
+        <text x="400" y="170">PAYMENT</text>
+      </g>
+      <g class="state-node" id="node-DISPENSE">
+        <rect x="585" y="35" width="110" height="50" class="inactive"/>
+        <text x="640" y="60">DISPENSE</text>
+      </g>
+      <g class="state-node" id="node-CHANGE">
+        <rect x="555" y="235" width="110" height="50" class="inactive"/>
+        <text x="610" y="260">CHANGE</text>
+      </g>
+      <g class="state-node" id="node-ERROR">
+        <rect x="45" y="235" width="110" height="50" class="inactive"/>
+        <text x="100" y="260">ERROR</text>
+      </g>
+    </svg>
+  </div>
+
+  <!-- Controls -->
+  <div class="panel">
+    <h2>Insert Coins</h2>
+    <div class="coin-buttons">
+      <button onclick="fsm.send({type:'INSERT_COIN', amount:5})">5¢</button>
+      <button onclick="fsm.send({type:'INSERT_COIN', amount:10})">10¢</button>
+      <button onclick="fsm.send({type:'INSERT_COIN', amount:25})">25¢</button>
+      <button onclick="fsm.send({type:'INSERT_COIN', amount:50})">50¢</button>
+      <button onclick="fsm.send({type:'INSERT_COIN', amount:100})">$1</button>
+    </div>
+
+    <h2>Select Item</h2>
+    <div class="item-grid" id="itemGrid"></div>
+
+    <h2>Actions</h2>
+    <div class="action-buttons">
+      <button class="btn-cancel" onclick="fsm.send({type:'CANCEL'})">Cancel</button>
+      <button class="btn-timeout" onclick="fsm.send({type:'TIMEOUT'})">Timeout</button>
+      <button class="btn-reset" onclick="resetMachine()">Reset Machine</button>
+    </div>
+  </div>
+
+  <!-- Status -->
+  <div class="panel">
+    <h2>Machine Status</h2>
+    <div class="status-row"><span class="status-label">State</span><span class="status-value" id="statusState">IDLE</span></div>
+    <div class="status-row"><span class="status-label">Balance</span><span class="status-value" id="statusBalance">$0.00</span></div>
+    <div class="status-row"><span class="status-label">Selected</span><span class="status-value" id="statusSelected">—</span></div>
+    <div class="status-row"><span class="status-label">Last Change</span><span class="status-value" id="statusChange">—</span></div>
+    <div class="status-row"><span class="status-label">Error</span><span class="status-value" id="statusError" style="color:#f87171">—</span></div>
+
+    <h2 style="margin-top:18px">Inventory</h2>
+    <div id="inventory"></div>
+  </div>
+
+  <!-- Event Log -->
+  <div class="panel log-panel">
+    <h2>Event Log</h2>
+    <div id="log"></div>
+  </div>
+
+  <!-- Data Stream Monitor -->
+  <div class="panel stream-panel">
+    <h2>Data Stream Byte Monitor</h2>
+    <div class="stream-stats">
+      <div class="stream-stat" id="streamTotalBytes">
+        <div class="label">Total Bytes</div>
+        <div class="value">0<span class="unit">B</span></div>
+      </div>
+      <div class="stream-stat" id="streamEventBytes">
+        <div class="label">Event Data (in)</div>
+        <div class="value">0<span class="unit">B</span></div>
+      </div>
+      <div class="stream-stat" id="streamStateBytes">
+        <div class="label">State Snapshots (out)</div>
+        <div class="value">0<span class="unit">B</span></div>
+      </div>
+      <div class="stream-stat" id="streamEventCount">
+        <div class="label">Events Processed</div>
+        <div class="value">0</div>
+      </div>
+      <div class="stream-stat" id="streamAvgSize">
+        <div class="label">Avg Event Size</div>
+        <div class="value">0<span class="unit">B</span></div>
+      </div>
+      <div class="stream-stat" id="streamThroughput">
+        <div class="label">Throughput</div>
+        <div class="value">0<span class="unit">B/s</span></div>
+      </div>
+    </div>
+    <div class="throughput-bar-bg"><div class="throughput-bar-fill" id="throughputBar"></div></div>
+    <div id="streamLog"></div>
+  </div>
+
+  <!-- Transition Table -->
+  <div class="panel table-panel">
+    <h2>State Transition Table</h2>
+    <table id="transTable">
+      <thead>
+        <tr><th>Current</th><th>Event</th><th>Condition</th><th>Action</th><th>Next</th></tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+  </div>
+</div>
+
+<script>
+// -----------------------------------------------------------------------
+// FSM Data
+// -----------------------------------------------------------------------
+const ITEMS = {
+  A1: { name: "Cola",    price: 150, stock: 5 },
+  B2: { name: "Chips",   price: 200, stock: 3 },
+  C3: { name: "Water",   price: 75,  stock: 10 },
+  D4: { name: "Candy",   price: 100, stock: 0 },
+};
+
+const TRANSITIONS = [
+  { from: "IDLE",    event: "INSERT_COIN",  cond: "—",               action: "Add to balance",            to: "SELECT" },
+  { from: "SELECT",  event: "SELECT_ITEM",  cond: "out of stock",    action: "Set error",                 to: "ERROR" },
+  { from: "SELECT",  event: "SELECT_ITEM",  cond: "balance ≥ price", action: "Set selected",              to: "DISPENSE" },
+  { from: "SELECT",  event: "SELECT_ITEM",  cond: "balance < price", action: "Set selected",              to: "PAYMENT" },
+  { from: "SELECT",  event: "INSERT_COIN",  cond: "—",               action: "Add to balance",            to: "SELECT" },
+  { from: "SELECT",  event: "CANCEL",       cond: "—",               action: "—",                         to: "CHANGE" },
+  { from: "SELECT",  event: "TIMEOUT",      cond: "—",               action: "—",                         to: "CHANGE" },
+  { from: "PAYMENT", event: "INSERT_COIN",  cond: "balance ≥ price", action: "Add to balance",            to: "DISPENSE" },
+  { from: "PAYMENT", event: "INSERT_COIN",  cond: "balance < price", action: "Add to balance",            to: "PAYMENT" },
+  { from: "PAYMENT", event: "CANCEL",       cond: "—",               action: "—",                         to: "CHANGE" },
+  { from: "PAYMENT", event: "TIMEOUT",      cond: "—",               action: "—",                         to: "CHANGE" },
+  { from: "DISPENSE",event: "(auto)",       cond: "balance > 0",     action: "Dispense, decrement stock", to: "CHANGE" },
+  { from: "DISPENSE",event: "(auto)",       cond: "balance = 0",     action: "Dispense, decrement stock", to: "IDLE" },
+  { from: "CHANGE",  event: "(auto)",       cond: "—",               action: "Return balance, reset",     to: "IDLE" },
+  { from: "ERROR",   event: "(auto)",       cond: "—",               action: "Refund, reset",             to: "IDLE" },
+];
+
+// -----------------------------------------------------------------------
+// Data Stream Byte Monitor
+// -----------------------------------------------------------------------
+const dataStreamMonitor = {
+  totalBytesIn: 0,       // event payload bytes entering FSM
+  totalBytesOut: 0,      // state snapshot bytes leaving FSM
+  eventCount: 0,
+  entries: [],           // per-event records
+  startTime: Date.now(),
+
+  // Measure byte length of a JS value serialized to JSON (UTF-8)
+  byteLength(obj) {
+    const json = JSON.stringify(obj);
+    return new Blob([json]).size;
+  },
+
+  // Hex preview of first N bytes of a JSON string
+  hexPreview(obj, maxBytes) {
+    maxBytes = maxBytes || 16;
+    const json = JSON.stringify(obj);
+    let hex = "";
+    for (let i = 0; i < Math.min(json.length, maxBytes); i++) {
+      hex += json.charCodeAt(i).toString(16).padStart(2, "0") + " ";
+    }
+    if (json.length > maxBytes) hex += "...";
+    return hex.trim();
+  },
+
+  // Record an inbound event and outbound state snapshot
+  record(event, prevState, newState, snapshot) {
+    const eventBytes = this.byteLength(event);
+    const snapshotBytes = this.byteLength(snapshot);
+    this.totalBytesIn += eventBytes;
+    this.totalBytesOut += snapshotBytes;
+    this.eventCount++;
+
+    const entry = {
+      seq: this.eventCount,
+      timestamp: Date.now(),
+      event,
+      eventBytes,
+      snapshotBytes,
+      prevState,
+      newState,
+    };
+    this.entries.push(entry);
+
+    this._logEntry(entry);
+    this._updateStats();
+  },
+
+  _logEntry(entry) {
+    const el = document.getElementById("streamLog");
+    const t = new Date(entry.timestamp).toLocaleTimeString();
+    const eventHex = this.hexPreview(entry.event);
+    const arrow = entry.prevState !== entry.newState
+      ? `${entry.prevState} → ${entry.newState}`
+      : entry.prevState;
+    el.innerHTML += `<div class="stream-entry">`
+      + `<span class="time">${t}</span> `
+      + `#${entry.seq} `
+      + `<span class="dir-in">IN</span> <span class="sz">${this.formatBytes(entry.eventBytes)}</span> `
+      + `<span class="dir-out">OUT</span> <span class="sz">${this.formatBytes(entry.snapshotBytes)}</span> `
+      + `[${arrow}] `
+      + `<span class="hex">${eventHex}</span>`
+      + `</div>`;
+    el.scrollTop = el.scrollHeight;
+  },
+
+  _updateStats() {
+    const total = this.totalBytesIn + this.totalBytesOut;
+    const avg = this.eventCount > 0 ? Math.round(this.totalBytesIn / this.eventCount) : 0;
+    const elapsed = (Date.now() - this.startTime) / 1000 || 1;
+    const throughput = total / elapsed;
+
+    document.querySelector("#streamTotalBytes .value").innerHTML = this.formatBytes(total) + '<span class="unit"></span>';
+    document.querySelector("#streamEventBytes .value").innerHTML = this.formatBytes(this.totalBytesIn) + '<span class="unit"></span>';
+    document.querySelector("#streamStateBytes .value").innerHTML = this.formatBytes(this.totalBytesOut) + '<span class="unit"></span>';
+    document.querySelector("#streamEventCount .value").textContent = this.eventCount;
+    document.querySelector("#streamAvgSize .value").innerHTML = this.formatBytes(avg) + '<span class="unit"></span>';
+    document.querySelector("#streamThroughput .value").innerHTML = this.formatBytes(Math.round(throughput)) + '<span class="unit">/s</span>';
+
+    // Throughput bar (cap at 2KB/s for display)
+    const pct = Math.min(100, (throughput / 2048) * 100);
+    document.getElementById("throughputBar").style.width = pct + "%";
+  },
+
+  formatBytes(b) {
+    if (b < 1024) return b + " B";
+    if (b < 1048576) return (b / 1024).toFixed(1) + " KB";
+    return (b / 1048576).toFixed(2) + " MB";
+  },
+
+  reset() {
+    this.totalBytesIn = 0;
+    this.totalBytesOut = 0;
+    this.eventCount = 0;
+    this.entries = [];
+    this.startTime = Date.now();
+    document.getElementById("streamLog").innerHTML = "";
+    this._updateStats();
+  },
+};
+
+// -----------------------------------------------------------------------
+// FSM Engine
+// -----------------------------------------------------------------------
+const fsm = {
+  state: "IDLE",
+  balance: 0,
+  selectedItem: "",
+  errorMessage: "",
+  changeDue: 0,
+  lastEdge: "",
+
+  // Build a full state snapshot for stream monitoring
+  _snapshot() {
+    return {
+      state: this.state,
+      balance: this.balance,
+      selectedItem: this.selectedItem,
+      errorMessage: this.errorMessage,
+      changeDue: this.changeDue,
+      inventory: Object.fromEntries(
+        Object.entries(ITEMS).map(([id, it]) => [id, { stock: it.stock }])
+      ),
+    };
+  },
+
+  send(event) {
+    const prevState = this.state;
+    this._process(event);
+
+    // Auto-transition DISPENSE, CHANGE, ERROR
+    let safety = 5;
+    while (["DISPENSE","CHANGE","ERROR"].includes(this.state) && safety-- > 0) {
+      this._process({ type: "AUTO" });
+    }
+
+    // Record streamed bytes: inbound event + outbound state snapshot
+    dataStreamMonitor.record(event, prevState, this.state, this._snapshot());
+
+    updateUI();
+  },
+
+  _process(event) {
+    const handler = this["_" + this.state];
+    if (handler) handler.call(this, event);
+  },
+
+  _IDLE(event) {
+    if (event.type === "INSERT_COIN" && event.amount > 0) {
+      this.balance += event.amount;
+      log("event", `INSERT_COIN +${event.amount}¢  →  balance ${this.balance}¢`);
+      this._transition("SELECT", "IDLE-SELECT");
+    }
+  },
+
+  _SELECT(event) {
+    if (event.type === "SELECT_ITEM") {
+      const id = event.item_id;
+      const item = ITEMS[id];
+      if (!item) {
+        this.errorMessage = `Unknown item: ${id}`;
+        log("error", this.errorMessage);
+        this._transition("ERROR", "SELECT-ERROR");
+        return;
+      }
+      if (item.stock <= 0) {
+        this.errorMessage = `Out of stock: ${item.name}`;
+        log("error", this.errorMessage);
+        this._transition("ERROR", "SELECT-ERROR");
+        return;
+      }
+      this.selectedItem = id;
+      if (this.balance >= item.price) {
+        log("event", `SELECT ${item.name} — balance sufficient`);
+        this._transition("DISPENSE", "SELECT-DISPENSE");
+      } else {
+        log("event", `SELECT ${item.name} — need ${item.price - this.balance}¢ more`);
+        this._transition("PAYMENT", "SELECT-PAYMENT");
+      }
+    } else if (event.type === "INSERT_COIN" && event.amount > 0) {
+      this.balance += event.amount;
+      log("event", `INSERT_COIN +${event.amount}¢  →  balance ${this.balance}¢`);
+      // stay in SELECT
+    } else if (event.type === "CANCEL") {
+      log("event", "CANCEL");
+      this._transition("CHANGE", "SELECT-CHANGE");
+    } else if (event.type === "TIMEOUT") {
+      log("event", "TIMEOUT");
+      this._transition("CHANGE", "SELECT-CHANGE");
+    }
+  },
+
+  _PAYMENT(event) {
+    if (event.type === "INSERT_COIN" && event.amount > 0) {
+      this.balance += event.amount;
+      const price = ITEMS[this.selectedItem].price;
+      if (this.balance >= price) {
+        log("event", `INSERT_COIN +${event.amount}¢  →  balance ${this.balance}¢ (enough!)`);
+        this._transition("DISPENSE", "PAYMENT-DISPENSE");
+      } else {
+        log("event", `INSERT_COIN +${event.amount}¢  →  need ${price - this.balance}¢ more`);
+        this._transition("PAYMENT", "PAYMENT-PAYMENT");
+      }
+    } else if (event.type === "CANCEL") {
+      log("event", "CANCEL");
+      this._transition("CHANGE", "PAYMENT-CHANGE");
+    } else if (event.type === "TIMEOUT") {
+      log("event", "TIMEOUT");
+      this._transition("CHANGE", "PAYMENT-CHANGE");
+    }
+  },
+
+  _DISPENSE(_event) {
+    const id = this.selectedItem;
+    const item = ITEMS[id];
+    item.stock--;
+    this.balance -= item.price;
+    log("action", `Dispensed ${item.name} (${id})`);
+    this.selectedItem = "";
+    if (this.balance > 0) {
+      this._transition("CHANGE", "DISPENSE-CHANGE");
+    } else {
+      this._resetCtx();
+      this._transition("IDLE", "DISPENSE-IDLE");
+    }
+  },
+
+  _CHANGE(_event) {
+    if (this.balance > 0) {
+      this.changeDue = this.balance;
+      log("change", `Returning ${this.balance}¢ change`);
+    }
+    this._resetCtx();
+    this._transition("IDLE", "CHANGE-IDLE");
+  },
+
+  _ERROR(_event) {
+    log("error", this.errorMessage);
+    if (this.balance > 0) {
+      log("change", `Refunding ${this.balance}¢`);
+    }
+    this._resetCtx();
+    this._transition("IDLE", "ERROR-IDLE");
+  },
+
+  _transition(newState, edgeId) {
+    this.lastEdge = edgeId;
+    this.state = newState;
+  },
+
+  _resetCtx() {
+    this.balance = 0;
+    this.selectedItem = "";
+    this.errorMessage = "";
+  },
+};
+
+// -----------------------------------------------------------------------
+// UI Rendering
+// -----------------------------------------------------------------------
+function cents(c) { return "$" + (c / 100).toFixed(2); }
+
+function updateUI() {
+  // Status
+  document.getElementById("statusState").textContent = fsm.state;
+  document.getElementById("statusBalance").textContent = cents(fsm.balance);
+  document.getElementById("statusSelected").textContent = fsm.selectedItem ? `${ITEMS[fsm.selectedItem].name} (${fsm.selectedItem})` : "—";
+  document.getElementById("statusChange").textContent = fsm.changeDue > 0 ? cents(fsm.changeDue) : "—";
+  document.getElementById("statusError").textContent = fsm.errorMessage || "—";
+  fsm.changeDue = 0;
+
+  // State nodes
+  document.querySelectorAll(".state-node rect").forEach(r => r.setAttribute("class", "inactive"));
+  const activeRect = document.querySelector(`#node-${fsm.state} rect`);
+  if (activeRect) activeRect.setAttribute("class", "active");
+
+  // Edges
+  document.querySelectorAll(".edge").forEach(e => e.classList.remove("active"));
+  if (fsm.lastEdge) {
+    const edgeEl = document.getElementById("edge-" + fsm.lastEdge);
+    if (edgeEl) edgeEl.classList.add("active");
+  }
+
+  // Item grid
+  renderItems();
+
+  // Inventory
+  renderInventory();
+
+  // Transition table highlight
+  document.querySelectorAll("#transTable tbody tr").forEach(r => r.classList.remove("active-row"));
+  document.querySelectorAll("#transTable tbody tr").forEach(r => {
+    if (r.children[0].textContent === fsm.state) r.classList.add("active-row");
+  });
+}
+
+function renderItems() {
+  const grid = document.getElementById("itemGrid");
+  grid.innerHTML = "";
+  for (const [id, item] of Object.entries(ITEMS)) {
+    const btn = document.createElement("button");
+    btn.innerHTML = `<strong>${id}</strong> ${item.name} ${cents(item.price)}<span class="stock">Stock: ${item.stock}</span>`;
+    if (item.stock <= 0) {
+      btn.className = "out-of-stock";
+    } else {
+      btn.onclick = () => fsm.send({ type: "SELECT_ITEM", item_id: id });
+    }
+    grid.appendChild(btn);
+  }
+}
+
+function renderInventory() {
+  const el = document.getElementById("inventory");
+  el.innerHTML = Object.entries(ITEMS).map(([id, item]) =>
+    `<div class="status-row"><span class="status-label">${id} ${item.name} (${cents(item.price)})</span><span class="status-value" style="color:${item.stock > 0 ? '#4ade80' : '#f87171'}">${item.stock}</span></div>`
+  ).join("");
+}
+
+function log(type, msg) {
+  const el = document.getElementById("log");
+  const t = new Date().toLocaleTimeString();
+  el.innerHTML += `<div class="log-entry ${type}"><span class="time">${t}</span>${msg}</div>`;
+  el.scrollTop = el.scrollHeight;
+}
+
+function resetMachine() {
+  fsm.state = "IDLE";
+  fsm.balance = 0;
+  fsm.selectedItem = "";
+  fsm.errorMessage = "";
+  fsm.changeDue = 0;
+  fsm.lastEdge = "";
+  for (const item of Object.values(ITEMS)) {
+    item.stock = { A1: 5, B2: 3, C3: 10, D4: 0 }[Object.keys(ITEMS).find(k => ITEMS[k] === item)] ?? 5;
+  }
+  // Reset stock properly
+  ITEMS.A1.stock = 5; ITEMS.B2.stock = 3; ITEMS.C3.stock = 10; ITEMS.D4.stock = 0;
+  document.getElementById("log").innerHTML = "";
+  dataStreamMonitor.reset();
+  log("action", "Machine reset");
+  updateUI();
+}
+
+// Build transition table
+function buildTable() {
+  const tbody = document.querySelector("#transTable tbody");
+  TRANSITIONS.forEach(t => {
+    const tr = document.createElement("tr");
+    tr.innerHTML = `<td>${t.from}</td><td>${t.event}</td><td>${t.cond}</td><td>${t.action}</td><td>${t.to}</td>`;
+    tbody.appendChild(tr);
+  });
+}
+
+// Init
+buildTable();
+renderItems();
+renderInventory();
+updateUI();
+log("action", "Machine ready");
+</script>
+</body>
+</html>
